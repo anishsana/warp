@@ -18,6 +18,7 @@
 package generator
 
 import (
+	cRand "crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -83,40 +84,125 @@ type randomSrc struct {
 	obj     Object
 }
 
+type plainSrc struct {
+	o		Options
+	rng		*rand.Rand
+	obj     Object
+	buf     *circularBuffer
+	builder []byte
+}
+
 func newRandom(o Options) (Source, error) {
+	c := plainSrc{
+		o: o,
+	}
 	rndSrc := rand.NewSource(int64(rand.Uint64()))
 	if o.random.seed != nil {
 		rndSrc = rand.NewSource(*o.random.seed)
 	}
 	rng := rand.New(rndSrc)
-
 	size := o.random.size
+	// size := int(o.totalSize)
 	if int64(size) > o.totalSize {
 		size = int(o.totalSize)
 	}
 	if size <= 0 {
 		return nil, fmt.Errorf("size must be >= 0, got %d", size)
 	}
-
 	// Seed with random data.
 	data := make([]byte, size)
 	_, err := io.ReadFull(rng, data)
 	if err != nil {
 		return nil, err
 	}
-	r := randomSrc{
-		o:   o,
-		rng: rng,
-		buf: newScrambler(data, o.totalSize, rng),
-		obj: Object{
-			Reader:      nil,
-			Name:        "",
-			ContentType: "application/octet-stream",
-			Size:        0,
-		},
+	c.builder = make([]byte, 0, o.totalSize)
+	c.buf = newCircularBuffer(data, o.totalSize)
+	c.rng = rng
+	c.obj.ContentType = "text/plain"
+	c.obj.Size = 0
+	c.obj.setPrefix(o)
+
+	return &c, nil
+	// rndSrc := rand.NewSource(int64(rand.Uint64()))
+	// if o.random.seed != nil {
+	// 	rndSrc = rand.NewSource(*o.random.seed)
+	// }
+	// rng := rand.New(rndSrc)
+
+	// size := o.random.size
+	// if int64(size) > o.totalSize {
+	// 	size = int(o.totalSize)
+	// }
+	// if size <= 0 {
+	// 	return nil, fmt.Errorf("size must be >= 0, got %d", size)
+	// }
+
+	// // Seed with random data.
+	// data := make([]byte, size)
+	// _, err := io.ReadFull(rng, data)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// r := randomSrc{
+	// 	o:   o,
+	// 	rng: rng,
+	// 	buf: newScrambler(data, o.totalSize, rng),
+	// 	obj: Object{
+	// 		Reader:      nil,
+	// 		Name:        "",
+	// 		ContentType: "application/octet-stream",
+	// 		Size:        0,
+	// 	},
+	// }
+	// r.obj.setPrefix(o)
+	// return &r, nil
+}
+
+func (c *plainSrc) Object() *Object {
+	// opts := c.o.csv
+	dst := c.buf.data[:0]
+	// for i := 0; i < len(dst); i++ {
+	// 	dst[i] = byte(97)
+	// }
+	c.obj.Size = c.o.getSize(c.rng)
+	// dst := [c.obj.Size]byte
+	build := make([]byte, c.obj.Size)
+	_, err := cRand.Read(build)
+	// randASCIIBytes(build[:c.obj.Size], c.rng)
+	if err != nil {
+		fmt.Println("error:", err)
+		// return
 	}
-	r.obj.setPrefix(o)
-	return &r, nil
+	// for i := 0; i < int(c.obj.Size); i++ {
+	dst = append(dst, build...)
+	splitLength := len(dst)/4
+
+	for i := splitLength; i < len(dst); i++ {
+		dst[i] = dst[i%splitLength]
+	}
+
+	// }
+	// for i := 0; i < opts.rows; i++ {
+	// 	for j := 0; j < opts.cols; j++ {
+	// 		fieldLen := 1 + opts.minLen
+	// 		if opts.minLen != opts.maxLen {
+	// 			fieldLen += c.rng.Intn(opts.maxLen - opts.minLen)
+	// 		}
+	// 		build := c.builder[:fieldLen]
+	// 		randASCIIBytes(build[:fieldLen-1], c.rng)
+	// 		build[fieldLen-1] = opts.comma
+	// 		if j == opts.cols-1 {
+	// 			build[fieldLen-1] = '\n'
+	// 		}
+	// 		dst = append(dst, build...)
+	// 	}
+	// }
+	c.buf.data = dst
+	c.obj.Reader = c.buf.Reset(0)
+	var nBuf [16]byte
+	randASCIIBytes(nBuf[:], c.rng)
+	c.obj.setName(string(nBuf[:]) + ".txt")
+	return &c.obj
 }
 
 func (r *randomSrc) Object() *Object {
@@ -136,6 +222,17 @@ func (r *randomSrc) String() string {
 		return fmt.Sprintf("Random data; random size up to %d bytes", r.o.totalSize)
 	}
 	return fmt.Sprintf("Random data; %d bytes total", r.buf.want)
+}
+
+func (r *plainSrc) String() string {
+	if r.o.randSize {
+		return fmt.Sprintf("Random data; random size up to %d bytes", r.o.totalSize)
+	}
+	return fmt.Sprintf("Random data; %d bytes total", r.buf.want)
+}
+
+func (r *plainSrc) Prefix() string {
+	return r.obj.Prefix
 }
 
 func (r *randomSrc) Prefix() string {
