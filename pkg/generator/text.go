@@ -125,29 +125,42 @@ func (t *textSrc) Object() *Object {
 	atomic.AddUint64(&t.counter, 1)
 
 	t.obj.Size = t.o.getSize(t.rng)
-	build := make([]byte, t.obj.Size)
 
-	// build array with random data; data will be incompressible
-	_, err := cRand.Read(build)
+	var uniqueStrLen int64
+	var remStrLen int
+	var repeatUniqueStrLen int64
+
+	if t.o.compRatio > 0 {
+		uniqueStrLen = t.obj.Size / int64(t.o.compRatio)
+		remStrLen = int(t.obj.Size % int64(t.o.compRatio))
+		repeatUniqueStrLen = uniqueStrLen * int64(t.o.compRatio)
+	} else {
+		uniqueStrLen = t.obj.Size
+		remStrLen = 0
+		repeatUniqueStrLen = uniqueStrLen
+	}
+
+	// build unique slice with random data; data will be incompressible
+	uniqueStr := make([]byte, uniqueStrLen)
+	_, err := cRand.Read(uniqueStr)
 	if err != nil {
 		fmt.Println("error:", err)
 		return nil
 	}
 
-	// applies compression if a ratio is provided
-	if t.o.compRatio > 0 {
-		/*
-		* original data will be compressible.
-		* elements in the array are repeated based on the compression ratio provided to simulate compressiblity.
-		 */
-		strRepeatLen := len(build) / t.o.compRatio
+	builder := make([]byte, 0)
 
-		for i := strRepeatLen; i < len(build); i++ {
-			build[i] = build[i%strRepeatLen]
-		}
+	// repeat full unique string
+	for int64(len(builder)) != repeatUniqueStrLen {
+		builder = append(builder, uniqueStr...)
 	}
 
-	t.buf.data = build
+	// fill remaining length with part of unique string
+	for i := 0; i < remStrLen; i++ {
+		builder = append(builder, builder[i])
+	}
+
+	t.buf.data = builder
 
 	var nBuf [16]byte
 	randASCIIBytes(nBuf[:], t.rng)
