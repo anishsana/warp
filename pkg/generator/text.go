@@ -125,29 +125,15 @@ func (t *textSrc) Object() *Object {
 	atomic.AddUint64(&t.counter, 1)
 
 	t.obj.Size = t.o.getSize(t.rng)
-	build := make([]byte, t.obj.Size)
 
-	// build array with random data; data will be incompressible
-	_, err := cRand.Read(build)
-	if err != nil {
-		fmt.Println("error:", err)
-		return nil
+	// build data until the desired size.
+	builder := make([]byte, 0)
+	for int64(len(builder)) < t.obj.Size {
+		reqSize := t.obj.Size - int64(len(builder))
+		builder = append(builder, genData(reqSize, t.o.compRatio)...)
 	}
 
-	// applies compression if a ratio is provided
-	if t.o.compRatio > 0 {
-		/*
-		* original data will be compressible.
-		* elements in the array are repeated based on the compression ratio provided to simulate compressiblity.
-		 */
-		strRepeatLen := len(build) / t.o.compRatio
-
-		for i := strRepeatLen; i < len(build); i++ {
-			build[i] = build[i%strRepeatLen]
-		}
-	}
-
-	t.buf.data = build
+	t.buf.data = builder
 
 	var nBuf [16]byte
 	randASCIIBytes(nBuf[:], t.rng)
@@ -156,6 +142,52 @@ func (t *textSrc) Object() *Object {
 	// Reset scrambler
 	t.obj.Reader = t.buf.Reset(t.obj.Size)
 	return &t.obj
+}
+
+const MAX_COMP_RATIO int64 = 2097152 // maximum supported compression ratio that works best with ZSTD.
+
+// generates compressible data with the provided compression ratio.
+func genData(reqSize int64, compRatio int) []byte {
+	var uniqueStrLen int64
+	var remStrLen int
+	var repeatUniqueStrLen int64
+
+	if compRatio > 0 && reqSize <= MAX_COMP_RATIO {
+		uniqueStrLen = reqSize / int64(compRatio)
+		remStrLen = int(reqSize % int64(compRatio))
+		repeatUniqueStrLen = uniqueStrLen * int64(compRatio)
+	} else if compRatio > 0 {
+		// restrict unique string to max compressible length
+		uniqueStrLen = MAX_COMP_RATIO / int64(compRatio)
+		remStrLen = int(MAX_COMP_RATIO % int64(compRatio))
+		repeatUniqueStrLen = uniqueStrLen * int64(compRatio)
+	} else {
+		uniqueStrLen = reqSize
+		remStrLen = 0
+		repeatUniqueStrLen = uniqueStrLen
+	}
+
+	// build unique slice with random data; data will be incompressible
+	uniqueStr := make([]byte, uniqueStrLen)
+	_, err := cRand.Read(uniqueStr)
+	if err != nil {
+		fmt.Println("error:", err)
+		return nil
+	}
+
+	builder := make([]byte, 0)
+
+	// repeat full unique string
+	for int64(len(builder)) != repeatUniqueStrLen {
+		builder = append(builder, uniqueStr...)
+	}
+
+	// fill remaining length with part of unique string
+	for i := 0; i < remStrLen; i++ {
+		builder = append(builder, builder[i])
+	}
+
+	return builder
 }
 
 func (t *textSrc) String() string {
