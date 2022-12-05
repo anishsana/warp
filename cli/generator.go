@@ -147,7 +147,7 @@ func applyGenerators(g generator.OptionApplier, ctx *cli.Context, prefixSize int
 	} else {
 		if ctx.Bool("obj.randsize") {
 			validateCompRatio(compRatio, generator.MIN_RAND_SIZE)
-		} else{
+		} else {
 			validateCompRatio(compRatio, int64(size))
 		}
 
@@ -164,6 +164,11 @@ func applyGenerators(g generator.OptionApplier, ctx *cli.Context, prefixSize int
 
 // validates the compression ratio provided.
 func validateCompRatio(compRatio int, size int64) {
+	if int64(compRatio) > int64(generator.MAX_COMP_RATIO) {
+		err := errors.New("compression ratio (" + strconv.Itoa(compRatio) + ") cannot be greater than the maximum supported compression ratio (" + strconv.FormatInt(generator.MAX_COMP_RATIO, 10) + ").")
+		fatalIf(probe.NewError(err), "Invalid compression ratio provided.")
+	}
+
 	if int64(compRatio) > size {
 		err := errors.New("compression ratio (" + strconv.Itoa(compRatio) + ") cannot be greater than the minimum object size (" + strconv.FormatInt(size, 10) + ").")
 		fatalIf(probe.NewError(err), "Invalid compression ratio provided.")

@@ -126,16 +126,43 @@ func (t *textSrc) Object() *Object {
 
 	t.obj.Size = t.o.getSize(t.rng)
 
+	// build data until the desired size.
+	builder := make([]byte, 0)
+	for int64(len(builder)) < t.obj.Size {
+		reqSize := t.obj.Size - int64(len(builder))
+		builder = append(builder, genData(reqSize, t.o.compRatio)...)
+	}
+
+	t.buf.data = builder
+
+	var nBuf [16]byte
+	randASCIIBytes(nBuf[:], t.rng)
+	t.obj.setName(fmt.Sprintf("%d.%s.txt", atomic.LoadUint64(&t.counter), string(nBuf[:])))
+
+	// Reset scrambler
+	t.obj.Reader = t.buf.Reset(t.obj.Size)
+	return &t.obj
+}
+
+const MAX_COMP_RATIO int64 = 2097152 // maximum supported compression ratio that works best with ZSTD.
+
+// generates compressible data with the provided compression ratio.
+func genData(reqSize int64, compRatio int) []byte {
 	var uniqueStrLen int64
 	var remStrLen int
 	var repeatUniqueStrLen int64
 
-	if t.o.compRatio > 0 {
-		uniqueStrLen = t.obj.Size / int64(t.o.compRatio)
-		remStrLen = int(t.obj.Size % int64(t.o.compRatio))
-		repeatUniqueStrLen = uniqueStrLen * int64(t.o.compRatio)
+	if compRatio > 0 && reqSize <= MAX_COMP_RATIO {
+		uniqueStrLen = reqSize / int64(compRatio)
+		remStrLen = int(reqSize % int64(compRatio))
+		repeatUniqueStrLen = uniqueStrLen * int64(compRatio)
+	} else if compRatio > 0 {
+		// restrict unique string to max compressible length
+		uniqueStrLen = MAX_COMP_RATIO / int64(compRatio)
+		remStrLen = int(MAX_COMP_RATIO % int64(compRatio))
+		repeatUniqueStrLen = uniqueStrLen * int64(compRatio)
 	} else {
-		uniqueStrLen = t.obj.Size
+		uniqueStrLen = reqSize
 		remStrLen = 0
 		repeatUniqueStrLen = uniqueStrLen
 	}
@@ -160,15 +187,7 @@ func (t *textSrc) Object() *Object {
 		builder = append(builder, builder[i])
 	}
 
-	t.buf.data = builder
-
-	var nBuf [16]byte
-	randASCIIBytes(nBuf[:], t.rng)
-	t.obj.setName(fmt.Sprintf("%d.%s.txt", atomic.LoadUint64(&t.counter), string(nBuf[:])))
-
-	// Reset scrambler
-	t.obj.Reader = t.buf.Reset(t.obj.Size)
-	return &t.obj
+	return builder
 }
 
 func (t *textSrc) String() string {
