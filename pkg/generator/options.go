@@ -35,6 +35,7 @@ type Options struct {
 	text         TextOpts
 	randomPrefix int
 	compRatio    int
+	compWindow   int64
 }
 
 // OptionApplier allows to abstract generator options.
@@ -126,6 +127,14 @@ func WithPrefixSize(n int) Option {
 func WithCompression(compRatio int) Option {
 	return func(o *Options) error {
 		o.compRatio = compRatio
+		return nil
+	}
+}
+
+// WithCompressionWindow sets the compression window.
+func WithCompressionWindow(compWindow int64) Option {
+	return func(o *Options) error {
+		o.compWindow = compWindow
 		return nil
 	}
 }

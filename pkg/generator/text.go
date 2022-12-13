@@ -130,7 +130,7 @@ func (t *textSrc) Object() *Object {
 	builder := make([]byte, 0)
 	for int64(len(builder)) < t.obj.Size {
 		reqSize := t.obj.Size - int64(len(builder))
-		builder = append(builder, genData(reqSize, t.o.compRatio)...)
+		builder = append(builder, genData(reqSize, t.o.compRatio, t.o.compWindow)...)
 	}
 
 	t.buf.data = builder
@@ -144,22 +144,27 @@ func (t *textSrc) Object() *Object {
 	return &t.obj
 }
 
-const MAX_COMP_RATIO int64 = 2097152 // maximum supported compression ratio that works best with ZSTD.
-
 // generates compressible data with the provided compression ratio.
-func genData(reqSize int64, compRatio int) []byte {
+func genData(reqSize int64, compRatio int, compWindow int64) []byte {
 	var uniqueStrLen int64
 	var remStrLen int
 	var repeatUniqueStrLen int64
 
-	if compRatio > 0 && reqSize <= MAX_COMP_RATIO {
+	if compRatio > 0 && reqSize <= compWindow {
 		uniqueStrLen = reqSize / int64(compRatio)
 		remStrLen = int(reqSize % int64(compRatio))
 		repeatUniqueStrLen = uniqueStrLen * int64(compRatio)
+
+		// if required size is less than compression ratio, repeat single byte for required size.
+		if uniqueStrLen == 0 {
+			uniqueStrLen = 1
+			remStrLen = 0
+			repeatUniqueStrLen = reqSize
+		}
 	} else if compRatio > 0 {
-		// restrict unique string to max compressible length
-		uniqueStrLen = MAX_COMP_RATIO / int64(compRatio)
-		remStrLen = int(MAX_COMP_RATIO % int64(compRatio))
+		// restrict unique string to compression window
+		uniqueStrLen = compWindow / int64(compRatio)
+		remStrLen = int(compWindow % int64(compRatio))
 		repeatUniqueStrLen = uniqueStrLen * int64(compRatio)
 	} else {
 		uniqueStrLen = reqSize

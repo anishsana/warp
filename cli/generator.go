@@ -51,6 +51,11 @@ var genFlags = []cli.Flag{
 			"\n\tFor instance, a value of 2 will generate data that is 50% compressible." +
 			"\n\tExample: 2",
 	},
+	cli.StringFlag{
+		Name:  "obj.comp.window",
+		Value: "256KiB",
+		Usage: "Window size to be used for compression data generation. Default: 256KiB",
+	},
 }
 
 func newGenSourceCSV(ctx *cli.Context) func() generator.Source {
@@ -131,24 +136,29 @@ func applyGenerators(g generator.OptionApplier, ctx *cli.Context, prefixSize int
 		fatalIf(probe.NewError(err), "obj.comp should be an integer")
 	}
 
+	var compWindow uint64
+	compWindow, err = toSize(ctx.String("obj.comp.window"))
+	fatalIf(probe.NewError(err), "failed to parse 'obj.comp.window'. provide a valid size in KiB or KB. example: 512KiB")
+
 	if ctx.String("obj.dist") != "" {
 		sizesArr := parseDisrtibutionSizes(ctx)
 
 		// make sure the min obj size from distribution is greater than compRatio.
-		validateCompRatio(compRatio, getMinObjSize(sizesArr))
+		validateCompParams(compRatio, getMinObjSize(sizesArr), compWindow)
 
 		src, err := generator.NewFn(g.Apply(),
 			generator.WithCustomPrefix(ctx.String("prefix")),
 			generator.WithPrefixSize(prefixSize),
 			generator.WithSizeDistribution(sizesArr),
 			generator.WithCompression(compRatio),
+			generator.WithCompressionWindow(int64(compWindow)),
 		)
 		return src, err
 	} else {
 		if ctx.Bool("obj.randsize") {
-			validateCompRatio(compRatio, generator.MIN_RAND_SIZE)
+			validateCompParams(compRatio, generator.MIN_RAND_SIZE, compWindow)
 		} else {
-			validateCompRatio(compRatio, int64(size))
+			validateCompParams(compRatio, int64(size), compWindow)
 		}
 
 		src, err := generator.NewFn(g.Apply(),
@@ -157,15 +167,16 @@ func applyGenerators(g generator.OptionApplier, ctx *cli.Context, prefixSize int
 			generator.WithSize(int64(size)),
 			generator.WithRandomSize(ctx.Bool("obj.randsize")),
 			generator.WithCompression(compRatio),
+			generator.WithCompressionWindow(int64(compWindow)),
 		)
 		return src, err
 	}
 }
 
-// validates the compression ratio provided.
-func validateCompRatio(compRatio int, size int64) {
-	if int64(compRatio) > int64(generator.MAX_COMP_RATIO) {
-		err := errors.New("compression ratio (" + strconv.Itoa(compRatio) + ") cannot be greater than the maximum supported compression ratio (" + strconv.FormatInt(generator.MAX_COMP_RATIO, 10) + ").")
+// validates the compression parameters provided.
+func validateCompParams(compRatio int, size int64, compWindow uint64) {
+	if int64(compRatio) > int64(compWindow) {
+		err := errors.New("compression ratio (" + strconv.Itoa(compRatio) + ") cannot be greater than the compression window size (" + strconv.FormatUint(compWindow, 10) + "); increase the compression window with '--obj.comp.window'.")
 		fatalIf(probe.NewError(err), "Invalid compression ratio provided.")
 	}
 
