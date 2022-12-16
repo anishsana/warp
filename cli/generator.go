@@ -43,18 +43,21 @@ var genFlags = []cli.Flag{
 		Name: "obj.dist",
 		Usage: "Specify a CSV string containing object size distributions such that all percentages add up to 100." +
 			"\n\tFormat: size1:percent1,size2:percent2,etc." +
-			"\n\tExample: 1KiB:10,4KiB:15,8KiB:15,16KiB:15,32KiB:15,64KiB:10,128KiB:5,256KiB:10,1MiB:5",
+			"\n\tExample: --obj.dist 1KiB:10,4KiB:15,8KiB:15,16KiB:15,32KiB:15,64KiB:10,128KiB:5,256KiB:10,1MiB:5",
 	},
 	cli.StringFlag{
 		Name: "obj.comp",
 		Usage: "Integer value for the compression ratio desired on the generated data." +
-			"\n\tFor instance, a value of 2 will generate data that is 50% compressible." +
-			"\n\tExample: 2",
+			"\n\tExample: A value of 2 will generate data that is 50% compressible.",
 	},
 	cli.StringFlag{
 		Name:  "obj.comp.window",
-		Value: "256KiB",
 		Usage: "Window size to be used for compression data generation. Default: 256KiB",
+	},
+	cli.StringFlag{
+		Name: "obj.comp.algo",
+		Usage: "Adjust compression window size appropriate to a specific algorithm." +
+			"\n\tSupported algorithms: zstd, zlib, brotli, lz4, snappy, gzip",
 	},
 }
 
@@ -125,6 +128,11 @@ func validateGeneratorFlags(ctx *cli.Context) {
 		err := errors.New("compression is only applicable to generator type 'text'. Specify the option: '--obj.generator text'")
 		fatalIf(probe.NewError(err), "Incompatible generator parameters.")
 	}
+
+	if ctx.String("obj.comp.window") != "" && ctx.String("obj.comp.algo") != "" {
+		err := errors.New("specify either 'obj.comp.window' or 'obj.comp.algo' options, not both")
+		fatalIf(probe.NewError(err), "Incompatible generator parameters.")
+	}
 }
 
 // applies generators based on the randomization option provided.
@@ -136,9 +144,7 @@ func applyGenerators(g generator.OptionApplier, ctx *cli.Context, prefixSize int
 		fatalIf(probe.NewError(err), "obj.comp should be an integer")
 	}
 
-	var compWindow uint64
-	compWindow, err = toSize(ctx.String("obj.comp.window"))
-	fatalIf(probe.NewError(err), "failed to parse 'obj.comp.window'. provide a valid size in KiB or KB. example: 512KiB")
+	compWindow := getCompWindow(ctx)
 
 	if ctx.String("obj.dist") != "" {
 		sizesArr := parseDisrtibutionSizes(ctx)
@@ -171,6 +177,46 @@ func applyGenerators(g generator.OptionApplier, ctx *cli.Context, prefixSize int
 		)
 		return src, err
 	}
+}
+
+// provides the compression window size to be used during compressible data generation.
+func getCompWindow(ctx *cli.Context) uint64 {
+	var compWindow uint64
+	var err error
+
+	if ctx.String("obj.comp.window") != "" {
+		compWindow, err = toSize(ctx.String("obj.comp.window"))
+		fatalIf(probe.NewError(err), "failed to parse 'obj.comp.window'. provide a valid size in KiB or KB. example: 512KiB")
+	} else if ctx.String("obj.comp.algo") != "" {
+		compWindow, err = toSize(getCompWindowFromAlgo(ctx.String("obj.comp.algo")))
+		fatalIf(probe.NewError(err), "failed to obtain window size for algorithm: "+ctx.String("obj.comp.algo"))
+	} else {
+		const DEFAULT_COMP_WINDOW string = "256KiB"
+		compWindow, err = toSize(DEFAULT_COMP_WINDOW)
+		fatalIf(probe.NewError(err), "failed to convert the default window size string of "+DEFAULT_COMP_WINDOW+" to bytes.")
+	}
+
+	return compWindow
+}
+
+// provides a compression window size specific to a compression algorithm.
+func getCompWindowFromAlgo(algo string) string {
+	algoCompMap := map[string]string{
+		"zstd":   "256KiB",
+		"zlib":   "32KiB",
+		"brotli": "16MiB",
+		"lz4":    "64KiB",
+		"snappy": "64KiB",
+		"gzip":   "32KiB",
+	}
+
+	compWindow, ok := algoCompMap[algo]
+	if !ok {
+		err := errors.New("received: " + algo + "; accepted: zstd, zlib, brotli, lz4, snappy, gzip")
+		fatalIf(probe.NewError(err), "Unsupported algorithm specified.")
+	}
+
+	return compWindow
 }
 
 // validates the compression parameters provided.
